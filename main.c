@@ -123,10 +123,8 @@ _u32 g_BytesReceived; /* variable to store the file size */
 _u8  g_buff[MAX_BUFF_SIZE+1];
 
 _i32 g_SockID = 0;
-/* NA brought in from main.c to handle pushbutton events off msp430f5529lp board */
-enum io_events{NO_ACTION = -1, PUSH_BUTTON_PRESSED = 0};
-volatile enum io_events g_io_events;
 
+volatile int g_button_pressed;
 /*
  * GLOBAL VARIABLES -- End
  */
@@ -145,21 +143,6 @@ static _i32 HTTPGetMethod(HTTPCli_Handle httpClient);
 static _i32 readResponse(HTTPCli_Handle httpClient);
 static void FlushHTTPResponse(HTTPCli_Handle httpClient);
 static _i32 ParseJSONData(_i8 *ptr);
-/*
- * STATIC FUNCTION DEFINITIONS -- End
- */
-/*!
- *  Button event handler on P1.4
- */
-/*
- * event handler for P1.4 not part of original cc3100sdk code
- */
-void button_P1_4_EventHandler(void);
-
-void button_P1_4_EventHandler(void)
-{
-    g_io_events = PUSH_BUTTON_PRESSED;
-}
 /*
  * STATIC FUNCTION DEFINITIONS -- End
  */
@@ -393,8 +376,8 @@ int main(int argc, char** argv)
     CLI_Configure();
 
     /* Set button on P1.4 up for irq */
-    registerButtonIrqHandler(button_P1_4_EventHandler, NULL);
-
+    //registerButtonIrqHandler(button_P1_4_EventHandler, NULL);
+    enableButtonIrq();
 
     /* Configure UCB1 SPI for 7-segment display */
     spi_Open_s7s();
@@ -452,7 +435,7 @@ int main(int argc, char** argv)
 
     for(;;)
     {
-        if(PUSH_BUTTON_PRESSED == g_io_events)
+        if(g_button_pressed == 1)
         {
             /* Connect to HTTP server */
             retVal = ConnectToHTTPServer(&httpClient);
@@ -476,7 +459,7 @@ int main(int argc, char** argv)
                 CLI_Write("\n\r");
             }
             //reset the button pressed flag, cleanup
-            g_io_events = NO_ACTION;
+            g_button_pressed = 0;
             enableButtonIrq();
         }
     }
