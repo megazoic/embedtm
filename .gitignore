@@ -1,0 +1,6 @@
+\.config
+\.launches
+Debug/
+.xdchelp
+Release/
+MSP430F5xx_6xx/
