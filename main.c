@@ -77,6 +77,7 @@
 #include "buf.h"
 /* Sparkfun 7-segment display include */
 #include "s7s_SPI.h"
+#include "url.h"
 
 #define APPLICATION_VERSION "1.2.0"
 
@@ -86,11 +87,7 @@
  * HTTP request parameters.
  * 'A' indicates requesting Arrival times, separate two stops with encoded ',' as %2C
  */
-#define GET_REQUEST_URI        "/7474/42AEOT21"
-
-#define HOST_NAME              "technomena.com"
-#define HOST_PORT              80
-
+//look for URL and parameters in url.h
 #define PROXY_IP               0xBA5FB660
 #define PROXY_PORT             <proxy_port>
 
@@ -125,6 +122,7 @@ _u8  g_buff[MAX_BUFF_SIZE+1];
 _i32 g_SockID = 0;
 
 volatile int g_button_pressed;
+volatile int g_minute_elapsed;
 /*
  * GLOBAL VARIABLES -- End
  */
@@ -381,6 +379,7 @@ int main(int argc, char** argv)
 
     /* Configure UCB1 SPI for 7-segment display */
     spi_Open_s7s();
+    spi_Clear_s7s();
 
     displayBanner();
 
@@ -408,35 +407,51 @@ int main(int argc, char** argv)
 
     CLI_Write(" Device is configured in default state \n\r");
 
-    /*
-     * Initializing the CC3100 device
-     * Assumption is that the device is configured in station mode already
-     * and it is in its default state
-     */
-    retVal = sl_Start(0, 0, 0);
-    if ((retVal < 0) ||
-            (ROLE_STA != retVal) )
-    {
-        CLI_Write(" Failed to start the device \n\r");
-        LOOP_FOREVER();
-    }
+    /* start the timer */
+    platform_timer_init();
 
-    CLI_Write(" Device started as STATION \n\r");
-
-    /* Connecting to WLAN AP */
-    retVal = establishConnectionWithAP();
-    if(retVal < 0)
-    {
-        CLI_Write(" Failed to establish connection w/ an AP \n\r");
-        LOOP_FOREVER();
-    }
-
-    CLI_Write(" Connection established w/ AP and IP is acquired \n\r");
+    int minuteCounter = 0, getResponse = 0;
 
     for(;;)
     {
         if(g_button_pressed == 1)
         {
+            /*
+             * Initializing the CC3100 device
+             * Assumption is that the device is configured in station mode already
+             * and it is in its default state
+             */
+            retVal = sl_Start(0, 0, 0);
+            if ((retVal < 0) ||
+                    (ROLE_STA != retVal) )
+            {
+                CLI_Write(" Failed to start the device \n\r");
+                LOOP_FOREVER();
+            }
+
+            CLI_Write(" Device started as STATION \n\r");
+
+            /* Connecting to WLAN AP */
+            retVal = establishConnectionWithAP();
+            if(retVal < 0)
+            {
+                CLI_Write(" Failed to establish connection w/ an AP \n\r");
+                LOOP_FOREVER();
+            }
+
+            CLI_Write(" Connection established w/ AP and IP is acquired \n\r");
+
+            /* moving this construct from ConnectToHTTPServer call */
+            HTTPCli_construct(&httpClient);
+            /* set flags to begin receiving data */
+            getResponse = 1;
+            g_minute_elapsed = 1;
+            g_button_pressed = 0;
+        }
+        if(getResponse == 1 && g_minute_elapsed == 1)
+        {
+            ++minuteCounter;
+            g_minute_elapsed = 0;
             /* Connect to HTTP server */
             retVal = ConnectToHTTPServer(&httpClient);
             if(retVal < 0)
@@ -458,21 +473,31 @@ int main(int argc, char** argv)
                 CLI_Write(" HTTP Get Test Completed Successfully\n\r");
                 CLI_Write("\n\r");
             }
+            /* clean up HTTPClient connection, not used in sdk example */
+            HTTPCli_disconnect(&httpClient);
+
             //reset the button pressed flag, cleanup
-            g_button_pressed = 0;
-            enableButtonIrq();
-        }
-    }
-    /* Stop the CC3100 device */
-
-    retVal = sl_Stop(SL_STOP_TIMEOUT);
-    if(retVal < 0)
-    {
-        LOOP_FOREVER();
-    }
-
+            if(minuteCounter > 45)
+            {
+                /* shut down the device, clear display for now */
+                getResponse = 0;
+                minuteCounter = 0;
+                spi_Clear_s7s();
+                /* Stop the CC3100 device */
+                retVal = sl_Stop(SL_STOP_TIMEOUT);
+                if(retVal < 0)
+                {
+                    LOOP_FOREVER();
+                }
+                /* reset app variables */
+                retVal = initializeAppVariables();
+                ASSERT_ON_ERROR(retVal);
+                enableButtonIrq();
+            }
+        }// end get_response && g_minute_elapsed
+    }// end infinite loop
     return SUCCESS;
-}
+}// end main
 
 
 /*!
@@ -737,21 +762,20 @@ static _i32 ConnectToHTTPServer(HTTPCli_Handle httpClient)
 #endif
 
      /* Resolve HOST NAME/IP */
-    retVal = sl_NetAppDnsGetHostByName(HOST_NAME, pal_Strlen(HOST_NAME),
+     retVal = sl_NetAppDnsGetHostByName(HOST_NAME, pal_Strlen(HOST_NAME),
                                        &g_DestinationIP, SL_AF_INET);
-    if(retVal < 0)
-    {
+     if(retVal < 0)
+     {
         CLI_Write(" Device couldn't get the IP for the host-name\r\n");
         ASSERT_ON_ERROR(retVal);
-    }
-
+     }
     /* Set up the input parameters for HTTP Connection */
     addr.sin_family = AF_INET;
     addr.sin_port = htons(HOST_PORT);
     addr.sin_addr.s_addr = sl_Htonl(g_DestinationIP);
 
     /* HTTPCli open call: handle, address params only */
-    HTTPCli_construct(httpClient);
+    //HTTPCli_construct(httpClient);
     retVal = HTTPCli_connect(httpClient, (struct sockaddr *)&addr, 0, NULL);
     if (retVal < 0)
     {
@@ -1005,45 +1029,53 @@ static _i32 ParseJSONData(_i8 *js)
     free(tokens);
 
     //send characters to s7s display
-    spi_Write_s7s(0x76);
-    spi_Write_s7s(dc1.pos1);
-    spi_Write_s7s(dc1.pos2);
-    spi_Write_s7s(dc1.pos3);
-    spi_Write_s7s(dc1.pos4);
+    spi_Write_s7s(0x76, 1);
+    spi_Write_s7s(dc1.pos1, 1);
+    spi_Write_s7s(dc1.pos2, 1);
+    spi_Write_s7s(dc1.pos3, 1);
+    spi_Write_s7s(dc1.pos4, 1);
+    spi_Write_s7s(0x76, 2);
+    spi_Write_s7s(dc2.pos1, 2);
+    spi_Write_s7s(dc2.pos2, 2);
+    spi_Write_s7s(dc2.pos3, 2);
+    spi_Write_s7s(dc2.pos4, 2);
 
     //check for error (decimal points)
-    if(dc1.errBus1 == 1 || dc1.errBus2 == 1)
+    if(dc1.errBus1 == 49 || dc1.errBus2 == 49)
     {
-        //control code to enter either decimal or colon
-       spi_Write_s7s(0x77);
-        //if(dc1.timeColon){
-        //    spi_Write_s7s(0x08);
-       //}
-        if (dc1.errBus1 == 1 && dc1.errBus2 == 1){
-            spi_Write_s7s(0x05);
-        }else if (dc1.errBus1 == 1){
-            spi_Write_s7s(0x01);
+        /* decimal points between the two digits represent error conditions
+         * control code to enter either decimal 0x77 then
+         * leftmost decimal (bus1 error) is 0x01, bus2 error 0x04
+         * test for '1' which is 49
+         */
+       spi_Write_s7s(0x77,1);
+        if (dc1.errBus1 == 49 && dc1.errBus2 == 49){
+            spi_Write_s7s(0x05,1);
+        }else if (dc1.errBus1 == 49){
+            spi_Write_s7s(0x01,1);
         }else{
-            spi_Write_s7s(0x04);
+            spi_Write_s7s(0x04,1);
+        }
+    }
+    //check for error (decimal points)
+    if(dc2.errBus1 == 49 || dc2.errBus2 == 49)
+    {
+        /* control code to enter either decimal or colon
+         * leftmost decimal (bus1 error) is 0x04
+         */
+       spi_Write_s7s(0x77,2);
+        if (dc2.errBus1 == 49 && dc2.errBus2 == 49){
+            spi_Write_s7s(0x05,2);
+        }else if (dc2.errBus1 == 49){
+            spi_Write_s7s(0x01,2);
+        }else{
+            spi_Write_s7s(0x04,2);
         }
     }
 
     return retVal;
 }
 
-
-/*!
-    \brief Obtain the file from the server
-
-    This function requests the file from the server and save it on serial flash.
-    To request a different file for different user needs to modify the
-    PREFIX_BUFFER and POST_BUFFER macros.
-
-    \param[in]      None
-
-    \return         0 for success and negative for error
-
-*/
 /*!
     \brief This function configure the SimpleLink device in its default state. It:
            - Sets the mode to STATION

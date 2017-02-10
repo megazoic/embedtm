@@ -9,7 +9,7 @@
 #include <msp430.h>
 
 
-void spi_Open_s7s()
+void spi_Open_s7s(void)
 {
     WDTCTL = WDTPW | WDTHOLD;   // Stop watchdog timer
     /* Select the SPI MOSI MISO on lines P4.1, P4.2; clock on P4.3 */
@@ -28,10 +28,10 @@ void spi_Open_s7s()
     UCB1BR1 = 0;
     /* Finished modifying UCB1CTL1&2 */
     UCB1CTL1 &= ~UCSWRST;
-    /* Configure the SPI CS to be on P2.3 */
-    P2OUT |= BIT3;
-    P2SEL &= ~BIT3;
-    P2DIR |= BIT3;
+    /* Configure the SPI CS to be on P2.3 and P2.6 */
+    P2OUT |= (BIT3 + BIT6);
+    P2SEL &= ~(BIT3 + BIT6);
+    P2DIR |= (BIT3 + BIT6);
 
     //_delay_cycles(175);
     /* 50 ms delay */
@@ -39,16 +39,40 @@ void spi_Open_s7s()
     //return 0;
 }
 
+/*
+ * clear both displays in future will want to put in low power mode
+ */
+void spi_Clear_s7s(void)
+{
+    //first display
+    P2OUT &= ~BIT3;
+    // Clear display
+    UCB1TXBUF = 0x76;
+    _delay_cycles(1000);
+    P2OUT |= BIT3;
+    //second display
+    P2OUT &= ~BIT6;
+    // Clear display
+    UCB1TXBUF = 0x76;
+    _delay_cycles(1000);
+    P2OUT |= BIT6;
+}
 /* In spi_Write delay achieved with
  * delay_cycles which is currently in us so that the following
  * gives a delay of 100 us which is just beyond the transmission
- * time needed
+ * time needed. Bus 1 is 75, 2 is 17
  */
 
-void spi_Write_s7s(int displayChar)
+void spi_Write_s7s(int displayChar, int busNo)
 {
-    //ASSERT_CS1();
-    P2OUT &= ~BIT3;
+    if(busNo == 1)
+    {
+        //ASSERT_CS1();
+        P2OUT &= ~BIT3;
+    }else
+    {
+        P2OUT &= ~BIT6;
+    }
 
     /*if (!(UCB1IFG&UCTXIFG))
     {*/
@@ -67,9 +91,16 @@ void spi_Write_s7s(int displayChar)
     /*}else{
         errorState = -1;
     }*/
-    //DEASSERT_CS1();
-    P2OUT |= BIT3;
+    if(busNo == 1)
+    {
+        //DEASSERT_CS1();
+        P2OUT |= BIT3;
+    }else
+    {
+        P2OUT |= BIT6;
+    }
 }
+
 DATA_KEY str2enum (const char *str)
 {
     int j;
@@ -81,16 +112,6 @@ DATA_KEY str2enum (const char *str)
     }
 }
 
-/*
-DATA_KEY str2enum(const char *str)
-{
-    int j;
-    for (j = 0; j < sizeof(conversion) / sizeof (conversion[0]); ++j)
-        if(!strcmp(str, conversion[j].str))
-            return conversion[j].val;
-    return compErr;
-}
-*/
 void placeData(char *str, struct displayChars *dcPtr, int busNo, int dataKind)
 {
     if(dataKind == 0)
@@ -127,53 +148,3 @@ void placeData(char *str, struct displayChars *dcPtr, int busNo, int dataKind)
         }
     }
 }
-
-/*
-void placeData(char *str, struct displayChars *dcPtr, VALUE dataDescriptor)
-{
-    switch(dataDescriptor){
-    case _75Ea:
-        dcPtr->err12 = str[0];
-        break;
-    case _75Eb:
-        dcPtr->err34 = str[0];
-        break;
-    case _75a:
-        if(strlen(str) == 1)
-        {
-            dcPtr->pos2 = str[0];
-        }else{
-            dcPtr->pos1 = str[0];
-            dcPtr->pos2 = str[1];
-        }
-        break;
-    case _75b:
-        if(strlen(str) == 1)
-        {
-            dcPtr->pos4 = str[0];
-        }else{
-            dcPtr->pos3 = str[0];
-            dcPtr->pos4 = str[1];
-        }
-        break;
-    case Time:
-        /* leave this out for now
-        if(strlen(str) == 3)
-        {
-            dcPtr->pos2 = str[0];
-            dcPtr->pos3 = str[1];
-            dcPtr->pos4 = str[2];
-        }else{
-            dcPtr->pos1 = str[0];
-            dcPtr->pos2 = str[1];
-            dcPtr->pos3 = str[2];
-            dcPtr->pos4 = str[3];
-        }
-        dcPtr->timeColon = 1;
-        * /
-        break;
-    default:
-        //error
-        break;
-    }
-}*/

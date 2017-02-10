@@ -11,7 +11,9 @@
 
 #ifndef S7S_SPI_H_
 #define S7S_SPI_H_
-void spi_Open_s7s();
+void spi_Open_s7s(void);
+void spi_Clear_s7s(void);
+
 /* holds digits to display on 4 digit display
  * left to right characters 1,2,3,4. chars 1&2
  * represent minutes for first bus, 3&4 2nd bus
@@ -60,5 +62,6 @@ VALUE str2enum (const char *str);
 */
 /* places minutes and error flags into struct displayChars */
 void placeData(char *str, struct displayChars *dcPtr, int busNo, int dataKind);
+void spi_Write_s7s(int displayChar, int busNo);
 
 #endif /* S7S_SPI_H_ */
